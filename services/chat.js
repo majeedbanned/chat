@@ -37,6 +37,8 @@ class ChatService {
   async getChatroomMessages(chatroomId, schoolCode, domain, limit = 50) {
     try {
       const connection = await connectToDatabase(domain);
+
+      console.log("domain", domain);
       const MessageModel = createMessageModel(connection);
       
       const messages = await MessageModel.find({ 

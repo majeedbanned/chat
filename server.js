@@ -56,9 +56,10 @@ const connectedClients = new Map();
 io.on('connection', (socket) => {
   const user = socket.user;
   console.log(`User connected: ${user.name} (${user.username})`);
+  console.log(`User connected: ${JSON.stringify( user)} `);
   
   // Store client connection
-  connectedClients.set(user.username, socket);
+  connectedClients.set(user.id, socket);
   
   // Handle joining a chatroom
   socket.on('join-room', async (chatroomId, callback) => {
@@ -84,7 +85,7 @@ io.on('connection', (socket) => {
       // Mark messages as read
       await chatService.markMessagesAsRead(
         chatroomId, 
-        user.username, 
+        user.id, 
         user.schoolCode, 
         socket.handshake.headers.host || 'localhost:3000'
       );
@@ -126,9 +127,9 @@ io.on('connection', (socket) => {
         schoolCode: user.schoolCode,
         content: messageData.content,
         sender: {
-          id: user.username,
+          id: user.id,
           name: user.name,
-          username: user.username,
+          username: user.id,
           role: user.role
         },
         timestamp: new Date(),
@@ -165,7 +166,7 @@ io.on('connection', (socket) => {
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${user.name} (${user.username})`);
-    connectedClients.delete(user.username);
+    connectedClients.delete(user.id);
   });
 });
 
