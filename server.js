@@ -79,7 +79,8 @@ io.on('connection', (socket) => {
       const messages = await chatService.getChatroomMessages(
         chatroomId, 
         user.schoolCode, 
-        socket.handshake.headers.host || 'localhost:3000'
+        //socket.handshake.headers.host || 'localhost:3000'
+        user.domain
       );
       
       // Mark messages as read
@@ -87,7 +88,8 @@ io.on('connection', (socket) => {
         chatroomId, 
         user.id, 
         user.schoolCode, 
-        socket.handshake.headers.host || 'localhost:3000'
+        //socket.handshake.headers.host || 'localhost:3000'
+        user.domain
       );
       
       // Send response
@@ -139,7 +141,8 @@ io.on('connection', (socket) => {
       // Save message to database
       const savedMessage = await chatService.saveMessage(
         newMessage, 
-        socket.handshake.headers.host || 'localhost:3000'
+       // socket.handshake.headers.host || 'localhost:3000'
+       user.domain
       );
       
       // Broadcast to room
@@ -185,8 +188,9 @@ app.get('/api/chatrooms', async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
     
-    const domain = req.headers['x-domain'] || 'localhost:3000';
-    const chatrooms = await chatService.getChatrooms(user.schoolCode, domain);
+   // const domain = req.headers['x-domain'] || 'localhost:3000';
+
+    const chatrooms = await chatService.getChatrooms(user.schoolCode, user.domain);
     
     res.json({ chatrooms });
   } catch (error) {
@@ -206,12 +210,12 @@ app.get('/api/messages/:chatroomId', async (req, res) => {
     }
     
     const { chatroomId } = req.params;
-    const domain = req.headers['x-domain'] || 'localhost:3000';
+   // const domain = req.headers['x-domain'] || 'localhost:3000';
     
     const messages = await chatService.getChatroomMessages(
       chatroomId, 
       user.schoolCode, 
-      domain
+      user.domain
     );
     
     res.json({ messages });
