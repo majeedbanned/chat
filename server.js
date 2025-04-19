@@ -191,6 +191,19 @@ io.on('connection', (socket) => {
         newMessage.fileAttachment = messageData.fileAttachment;
       }
       
+      // Add reply information if present
+      if (messageData.replyTo) {
+        newMessage.replyTo = {
+          id: messageData.replyTo.id,
+          content: messageData.replyTo.content,
+          sender: {
+            id: messageData.replyTo.sender.id,
+            name: messageData.replyTo.sender.name
+          },
+          hasAttachment: !!messageData.replyTo.hasAttachment
+        };
+      }
+      
       try {
         // Save message to database
         const savedMessage = await chatService.saveMessage(

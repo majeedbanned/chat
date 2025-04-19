@@ -30,6 +30,17 @@ const createMessageModel = (connection) => {
     users: [reactionUserSchema]
   }, { _id: false });
 
+  // Define schema for referenced message (used in replies)
+  const referencedMessageSchema = new Schema({
+    id: { type: String, required: true },
+    content: { type: String, required: true },
+    sender: {
+      id: { type: String, required: true },
+      name: { type: String, required: true }
+    },
+    hasAttachment: { type: Boolean, default: false }
+  }, { _id: false });
+
   // Main message schema
   const messageSchema = new Schema({
     chatroomId: {
@@ -76,6 +87,10 @@ const createMessageModel = (connection) => {
       type: Map,
       of: reactionSchema,
       default: () => new Map()
+    },
+    replyTo: {
+      type: referencedMessageSchema,
+      required: false
     }
   }, { 
     timestamps: true 
