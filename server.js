@@ -340,6 +340,64 @@ io.on('connection', (socket) => {
     }
   });
   
+  // Handle message reactions
+  socket.on('toggle-reaction', async (data, callback) => {
+    try {
+      const { messageId, chatroomId, emoji } = data;
+      
+      if (!messageId || !chatroomId || !emoji) {
+        if (callback) {
+          callback({
+            success: false,
+            error: 'Missing required fields'
+          });
+        }
+        return;
+      }
+      
+      // Call the service to toggle the reaction
+      const result = await chatService.toggleReaction(
+        messageId,
+        emoji,
+        user,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (result.success) {
+        // Notify all users in the chatroom about the reaction change
+        io.to(chatroomId).emit('message-reaction-updated', { 
+          messageId,
+          reactions: result.message.reactions || {}
+        });
+        
+        // Return success
+        if (callback) {
+          callback({
+            success: true,
+            reactions: result.message.reactions || {}
+          });
+        }
+      } else {
+        // Return error
+        if (callback) {
+          callback({
+            success: false,
+            error: result.error
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error handling reaction:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to process reaction'
+        });
+      }
+    }
+  });
+  
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${user.name} (${user.username})`);

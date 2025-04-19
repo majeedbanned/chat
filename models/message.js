@@ -18,6 +18,18 @@ const createMessageModel = (connection) => {
     isImage: { type: Boolean, default: false }
   });
 
+  // Define schema for a user in a reaction
+  const reactionUserSchema = new Schema({
+    id: { type: String, required: true },
+    name: { type: String, required: true }
+  }, { _id: false });
+
+  // Define schema for a reaction
+  const reactionSchema = new Schema({
+    emoji: { type: String, required: true },
+    users: [reactionUserSchema]
+  }, { _id: false });
+
   // Main message schema
   const messageSchema = new Schema({
     chatroomId: {
@@ -51,6 +63,19 @@ const createMessageModel = (connection) => {
     fileAttachment: {
       type: fileAttachmentSchema,
       required: false
+    },
+    edited: {
+      type: Boolean,
+      default: false
+    },
+    editedAt: {
+      type: Date,
+      required: false
+    },
+    reactions: {
+      type: Map,
+      of: reactionSchema,
+      default: () => new Map()
     }
   }, { 
     timestamps: true 
