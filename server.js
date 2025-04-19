@@ -228,6 +228,59 @@ io.on('connection', (socket) => {
     }
   });
   
+  // Handle deleting a message
+  socket.on('delete-message', async (data, callback) => {
+    try {
+      const { messageId, chatroomId } = data;
+      
+      if (!messageId || !chatroomId) {
+        if (callback) {
+          callback({
+            success: false,
+            error: 'Missing required fields'
+          });
+        }
+        return;
+      }
+      
+      // Call the service to delete the message
+      const result = await chatService.deleteMessage(
+        messageId,
+        user.id,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (result.success) {
+        // Notify all users in the chatroom that a message was deleted
+        io.to(chatroomId).emit('message-deleted', { messageId });
+        
+        // Return success
+        if (callback) {
+          callback({
+            success: true
+          });
+        }
+      } else {
+        // Return error
+        if (callback) {
+          callback({
+            success: false,
+            error: result.error
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to delete message'
+        });
+      }
+    }
+  });
+  
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${user.name} (${user.username})`);
