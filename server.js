@@ -281,6 +281,65 @@ io.on('connection', (socket) => {
     }
   });
   
+  // Handle editing a message
+  socket.on('edit-message', async (data, callback) => {
+    try {
+      const { messageId, chatroomId, newContent } = data;
+      
+      if (!messageId || !chatroomId || !newContent) {
+        if (callback) {
+          callback({
+            success: false,
+            error: 'Missing required fields'
+          });
+        }
+        return;
+      }
+      
+      // Call the service to edit the message
+      const result = await chatService.editMessage(
+        messageId,
+        user.id,
+        user.schoolCode,
+        user.domain,
+        newContent
+      );
+      
+      if (result.success) {
+        // Notify all users in the chatroom that a message was edited
+        io.to(chatroomId).emit('message-edited', { 
+          messageId,
+          newContent: result.updatedMessage.content,
+          editedAt: result.updatedMessage.editedAt
+        });
+        
+        // Return success
+        if (callback) {
+          callback({
+            success: true,
+            updatedMessage: result.updatedMessage
+          });
+        }
+      } else {
+        // Return error
+        if (callback) {
+          callback({
+            success: false,
+            error: result.error
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error editing message:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to edit message'
+        });
+      }
+    }
+  });
+  
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${user.name} (${user.username})`);

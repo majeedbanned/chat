@@ -153,6 +153,61 @@ class ChatService {
       return { success: false, error: error.message };
     }
   }
+
+  /**
+   * Edit a specific message
+   * @param {string} messageId - Message ID
+   * @param {string} userId - User ID (for authorization)
+   * @param {string} schoolCode - School code
+   * @param {string} domain - Domain name
+   * @param {string} newContent - New message content
+   * @returns {Promise<Object>} Edit result
+   */
+  async editMessage(messageId, userId, schoolCode, domain, newContent) {
+    try {
+      const connection = await connectToDatabase(domain);
+      const MessageModel = createMessageModel(connection);
+      
+      // First, find the message to verify the sender
+      const message = await MessageModel.findOne({
+        _id: messageId,
+        schoolCode
+      });
+      
+      // Message not found
+      if (!message) {
+        return { success: false, error: 'Message not found' };
+      }
+      
+      // Check if the user is the sender of the message
+      if (message.sender.id !== userId) {
+        return { success: false, error: 'Unauthorized: You can only edit your own messages' };
+      }
+      
+      // Check if content is empty
+      if (!newContent.trim()) {
+        return { success: false, error: 'Message content cannot be empty' };
+      }
+      
+      // Update the message
+      const result = await MessageModel.findByIdAndUpdate(
+        messageId, 
+        { 
+          $set: { 
+            content: newContent.trim(),
+            edited: true,
+            editedAt: new Date()
+          } 
+        },
+        { new: true } // Return the updated document
+      );
+      
+      return { success: true, updatedMessage: result };
+    } catch (error) {
+      console.error('Error editing message:', error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 module.exports = new ChatService(); 
