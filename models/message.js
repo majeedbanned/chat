@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { Schema } = mongoose;
 
 /**
  * MongoDB schema for chat messages
@@ -6,7 +7,19 @@ const mongoose = require('mongoose');
  * @returns {mongoose.Model} Message model
  */
 const createMessageModel = (connection) => {
-  const messageSchema = new mongoose.Schema({
+  // Define a separate schema for file attachments
+  const fileAttachmentSchema = new Schema({
+    filename: { type: String, required: true },
+    originalName: { type: String, required: true },
+    path: { type: String, required: true },
+    size: { type: Number, required: true },
+    type: { type: String, required: true },
+    url: { type: String, required: true },
+    isImage: { type: Boolean, default: false }
+  });
+
+  // Main message schema
+  const messageSchema = new Schema({
     chatroomId: {
       type: String,
       required: true,
@@ -25,7 +38,7 @@ const createMessageModel = (connection) => {
     },
     content: {
       type: String,
-      required: true
+      default: ''
     },
     timestamp: {
       type: Date,
@@ -34,9 +47,21 @@ const createMessageModel = (connection) => {
     read: {
       type: Boolean,
       default: false
+    },
+    fileAttachment: {
+      type: fileAttachmentSchema,
+      required: false
     }
   }, { 
     timestamps: true 
+  });
+
+  // Add a validation to ensure at least content or fileAttachment is present
+  messageSchema.pre('validate', function(next) {
+    if (this.content.trim() === '' && !this.fileAttachment) {
+      this.invalidate('content', 'Either content or file attachment is required');
+    }
+    next();
   });
 
   // Try to get existing model or create new one

@@ -5,6 +5,9 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const { verifyToken } = require('./lib/auth');
 const chatService = require('./services/chat');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 
 // Create Express app
 const app = express();
@@ -18,6 +21,53 @@ app.use(cors({
 
 // Parse JSON request body
 app.use(express.json());
+
+// Set up public folder for file access
+app.use('/uploads', express.static('uploads'));
+
+// Configure file upload storage
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+      return cb(new Error('Authentication required'), null);
+    }
+    
+    // Verify token to get user
+    verifyToken(token).then(user => {
+      if (!user) {
+        return cb(new Error('Invalid token'), null);
+      }
+      
+      // Create upload directory if it doesn't exist
+      const uploadDir = `uploads/${user.schoolCode}/chat`;
+      fs.mkdirSync(uploadDir, { recursive: true });
+      
+      cb(null, uploadDir);
+    }).catch(err => {
+      cb(err, null);
+    });
+  },
+  filename: function (req, file, cb) {
+    // Generate unique filename with original extension
+    const uniqueFilename = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const fileExt = path.extname(file.originalname);
+    cb(null, uniqueFilename + fileExt);
+  }
+});
+
+// Set up multer upload
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: process.env.FILE_UPLOAD_MAX_SIZE ? parseInt(process.env.FILE_UPLOAD_MAX_SIZE) : 10 * 1024 * 1024 // Default 10MB limit
+  },
+  fileFilter: function(req, file, cb) {
+    // Allow all file types for now; add restrictions if needed
+    cb(null, true);
+  }
+});
 
 // Socket.IO instance with CORS
 const io = new Server(server, {
@@ -56,7 +106,6 @@ const connectedClients = new Map();
 io.on('connection', (socket) => {
   const user = socket.user;
   console.log(`User connected: ${user.name} (${user.username})`);
-  console.log(`User connected: ${JSON.stringify( user)} `);
   
   // Store client connection
   connectedClients.set(user.id, socket);
@@ -79,7 +128,6 @@ io.on('connection', (socket) => {
       const messages = await chatService.getChatroomMessages(
         chatroomId, 
         user.schoolCode, 
-        //socket.handshake.headers.host || 'localhost:3000'
         user.domain
       );
       
@@ -88,7 +136,6 @@ io.on('connection', (socket) => {
         chatroomId, 
         user.id, 
         user.schoolCode, 
-        //socket.handshake.headers.host || 'localhost:3000'
         user.domain
       );
       
@@ -113,7 +160,8 @@ io.on('connection', (socket) => {
   // Handle sending a message
   socket.on('send-message', async (messageData, callback) => {
     try {
-      if (!messageData.content.trim()) {
+      // Check that at least one of content or fileAttachment is provided
+      if (!messageData.content.trim() && !messageData.fileAttachment) {
         if (callback) {
           callback({
             success: false,
@@ -127,7 +175,7 @@ io.on('connection', (socket) => {
       const newMessage = {
         chatroomId: messageData.chatroomId,
         schoolCode: user.schoolCode,
-        content: messageData.content,
+        content: messageData.content.trim(), // Trim but allow empty string when file is attached
         sender: {
           id: user.id,
           name: user.name,
@@ -137,30 +185,44 @@ io.on('connection', (socket) => {
         timestamp: new Date(),
         read: false
       };
+
+      // Add file attachment if present
+      if (messageData.fileAttachment) {
+        newMessage.fileAttachment = messageData.fileAttachment;
+      }
       
-      // Save message to database
-      const savedMessage = await chatService.saveMessage(
-        newMessage, 
-       // socket.handshake.headers.host || 'localhost:3000'
-       user.domain
-      );
-      
-      // Broadcast to room
-      io.to(messageData.chatroomId).emit('new-message', savedMessage);
-      
-      // Return success
-      if (callback) {
-        callback({
-          success: true,
-          message: savedMessage
-        });
+      try {
+        // Save message to database
+        const savedMessage = await chatService.saveMessage(
+          newMessage, 
+          user.domain
+        );
+        
+        // Broadcast to room
+        io.to(messageData.chatroomId).emit('new-message', savedMessage);
+        
+        // Return success
+        if (callback) {
+          callback({
+            success: true,
+            message: savedMessage
+          });
+        }
+      } catch (saveError) {
+        console.error('Error saving message:', saveError);
+        if (callback) {
+          callback({
+            success: false,
+            error: 'Failed to save message: ' + (saveError.message || 'Unknown error')
+          });
+        }
       }
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error processing message:', error);
       if (callback) {
         callback({
           success: false,
-          error: 'Failed to send message'
+          error: 'Failed to process message: ' + (error.message || 'Unknown error')
         });
       }
     }
@@ -178,6 +240,46 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Chat server is running' });
 });
 
+// Upload file endpoint
+app.post('/api/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    const token = req.headers.authorization?.split(' ')[1];
+    const user = await verifyToken(token);
+    
+    if (!user) {
+      // Remove the uploaded file if authentication fails
+      fs.unlinkSync(req.file.path);
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    // Check if file is an image
+    const isImage = req.file.mimetype.startsWith('image/');
+    
+    // Create file attachment object with the same structure as our Mongoose schema
+    const fileAttachment = {
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      path: req.file.path,
+      size: req.file.size,
+      type: req.file.mimetype,
+      url: `/uploads/${user.schoolCode}/chat/${req.file.filename}`,
+      isImage
+    };
+
+    // Log the file attachment object for debugging
+    console.log('Created file attachment:', JSON.stringify(fileAttachment, null, 2));
+    
+    res.json({ success: true, fileAttachment });
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    res.status(500).json({ error: 'Failed to upload file: ' + error.message });
+  }
+});
+
 // GET endpoint to retrieve chatrooms
 app.get('/api/chatrooms', async (req, res) => {
   try {
@@ -188,8 +290,6 @@ app.get('/api/chatrooms', async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
     
-   // const domain = req.headers['x-domain'] || 'localhost:3000';
-
     const chatrooms = await chatService.getChatrooms(user.schoolCode, user.domain);
     
     res.json({ chatrooms });
@@ -210,7 +310,6 @@ app.get('/api/messages/:chatroomId', async (req, res) => {
     }
     
     const { chatroomId } = req.params;
-   // const domain = req.headers['x-domain'] || 'localhost:3000';
     
     const messages = await chatService.getChatroomMessages(
       chatroomId, 
