@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const { verifyToken } = require('./lib/auth');
 const chatService = require('./services/chat');
+const floatingChatService = require('./services/floatingChat');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
@@ -124,27 +125,51 @@ io.on('connection', (socket) => {
       socket.join(chatroomId);
       console.log(`${user.name} joined room: ${chatroomId}`);
       
-      // Get previous messages
-      const messages = await chatService.getChatroomMessages(
-        chatroomId, 
-        user.schoolCode, 
-        user.domain
-      );
-      
-      // Mark messages as read
-      await chatService.markMessagesAsRead(
-        chatroomId, 
-        user.id, 
-        user.schoolCode, 
-        user.domain
-      );
-      
-      // Send response
-      if (callback) {
-        callback({
-          success: true,
-          messages
-        });
+      // If this is the floating chat room, use the floating chat service
+      if (chatroomId === 'floating-chat') {
+        // Get previous messages
+        const messages = await floatingChatService.getMessages(
+          user.schoolCode, 
+          user.domain
+        );
+        
+        // Mark messages as read
+        await floatingChatService.markMessagesAsRead(
+          user.id, 
+          user.schoolCode, 
+          user.domain
+        );
+        
+        // Send response
+        if (callback) {
+          callback({
+            success: true,
+            messages
+          });
+        }
+      } else {
+        // Get previous messages for regular chat rooms
+        const messages = await chatService.getChatroomMessages(
+          chatroomId, 
+          user.schoolCode, 
+          user.domain
+        );
+        
+        // Mark messages as read
+        await chatService.markMessagesAsRead(
+          chatroomId, 
+          user.id, 
+          user.schoolCode, 
+          user.domain
+        );
+        
+        // Send response
+        if (callback) {
+          callback({
+            success: true,
+            messages
+          });
+        }
       }
     } catch (error) {
       console.error('Error joining room:', error);
@@ -173,7 +198,6 @@ io.on('connection', (socket) => {
       
       // Create message with sender info
       const newMessage = {
-        chatroomId: messageData.chatroomId,
         schoolCode: user.schoolCode,
         content: messageData.content.trim(), // Trim but allow empty string when file is attached
         sender: {
@@ -205,11 +229,25 @@ io.on('connection', (socket) => {
       }
       
       try {
-        // Save message to database
-        const savedMessage = await chatService.saveMessage(
-          newMessage, 
-          user.domain
-        );
+        let savedMessage;
+        
+        // Check if this is a floating chat message
+        if (messageData.chatroomId === 'floating-chat') {
+          // Save message to floating chat collection
+          savedMessage = await floatingChatService.saveMessage(
+            newMessage, 
+            user.domain
+          );
+        } else {
+          // For regular chat, add chatroomId to the message
+          newMessage.chatroomId = messageData.chatroomId;
+          
+          // Save message to regular chat collection
+          savedMessage = await chatService.saveMessage(
+            newMessage, 
+            user.domain
+          );
+        }
         
         // Broadcast to room
         io.to(messageData.chatroomId).emit('new-message', savedMessage);
@@ -411,6 +449,82 @@ io.on('connection', (socket) => {
     }
   });
   
+  // Handle deleting a floating chat message
+  socket.on('delete-floating-message', async (data, callback) => {
+    try {
+      const { messageId } = data;
+      
+      if (!messageId) {
+        if (callback) {
+          callback({
+            success: false,
+            error: 'Message ID is required'
+          });
+        }
+        return;
+      }
+      
+      const result = await floatingChatService.deleteMessage(
+        messageId,
+        user.id,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (result.success) {
+        // Broadcast deletion to floating chat room
+        io.to('floating-chat').emit('message-deleted', { messageId });
+        
+        if (callback) {
+          callback({
+            success: true
+          });
+        }
+      } else {
+        if (callback) {
+          callback({
+            success: false,
+            error: result.error
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting floating message:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to delete message'
+        });
+      }
+    }
+  });
+  
+  // Get unread floating chat message count
+  socket.on('get-floating-unread-count', async (_, callback) => {
+    try {
+      const count = await floatingChatService.getUnreadCount(
+        user.id,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (callback) {
+        callback({
+          success: true,
+          count
+        });
+      }
+    } catch (error) {
+      console.error('Error getting unread floating message count:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to get unread count'
+        });
+      }
+    }
+  });
+  
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${user.name} (${user.username})`);
@@ -504,6 +618,90 @@ app.get('/api/messages/:chatroomId', async (req, res) => {
   } catch (error) {
     console.error('Error fetching messages:', error);
     res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// Create API routes for floating chat
+app.get('/api/floating-chat/messages', async (req, res) => {
+  try {
+    // Get auth token
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    // Verify user
+    const user = await verifyToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    
+    // Get messages
+    const messages = await floatingChatService.getMessages(
+      user.schoolCode,
+      user.domain
+    );
+    
+    return res.json({ success: true, messages });
+  } catch (error) {
+    console.error('Error fetching floating chat messages:', error);
+    return res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+app.post('/api/floating-chat/mark-read', async (req, res) => {
+  try {
+    // Get auth token
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    // Verify user
+    const user = await verifyToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    
+    // Mark messages as read
+    const result = await floatingChatService.markMessagesAsRead(
+      user.id,
+      user.schoolCode,
+      user.domain
+    );
+    
+    return res.json({ success: true, result });
+  } catch (error) {
+    console.error('Error marking floating chat messages as read:', error);
+    return res.status(500).json({ error: 'Failed to mark messages as read' });
+  }
+});
+
+app.get('/api/floating-chat/unread-count', async (req, res) => {
+  try {
+    // Get auth token
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    // Verify user
+    const user = await verifyToken(token);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+    
+    // Get unread count
+    const count = await floatingChatService.getUnreadCount(
+      user.id,
+      user.schoolCode,
+      user.domain
+    );
+    
+    return res.json({ success: true, count });
+  } catch (error) {
+    console.error('Error getting unread floating chat message count:', error);
+    return res.status(500).json({ error: 'Failed to get unread count' });
   }
 });
 
