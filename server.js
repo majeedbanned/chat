@@ -15,7 +15,7 @@ const server = http.createServer(app);
 
 // Enable CORS
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://formmaker3.com'],
+  origin: ['http://localhost:3000', 'https://formmaker3.com','https://parsplus.farsamooz.ir'],
   credentials: true
 }));
 
@@ -72,7 +72,7 @@ const upload = multer({
 // Socket.IO instance with CORS
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:3000', 'https://formmaker3.com'],
+    origin: ['http://localhost:3000', 'https://formmaker3.com','https://parsplus.farsamooz.ir'],
     methods: ['GET', 'POST'],
     credentials: true
   }
