@@ -1,0 +1,19 @@
+{
+  "localhost:3000": {
+    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/parsamooz?authSource=admin",
+    "description": "Local development database"
+  },
+  "localhost:3001": {
+    "connectionString": "mongodb://masterdbUser:anotherStrongPassword123@185.128.137.182:27017/masterdb?authSource=masterdb",
+    "description": "Test environment database"
+  },
+  "parsplus.farsamooz.ir": {
+    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/parsamooz?authSource=admin",
+    "description": "Production database for alireza.ir"
+  }
+  ,
+  "parsplus1.farsamooz.ir": {
+    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/parsplus1?authSource=admin",
+    "description": "parsplus1.farsamooz.ir"
+  }
+} 
