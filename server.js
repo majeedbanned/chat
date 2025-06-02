@@ -252,6 +252,34 @@ io.on('connection', (socket) => {
         // Broadcast to room
         io.to(messageData.chatroomId).emit('new-message', savedMessage);
         
+        // Notify other users in the school about unread count changes
+        // Get all connected clients from the same school
+        console.log(`Total connected clients: ${connectedClients.size}`);
+        console.log(`Sender: ${user.id} (${user.schoolCode})`);
+        
+        for (const [clientUserId, clientSocket] of connectedClients) {
+          console.log(`Checking client: ${clientUserId} (${clientSocket.user.schoolCode})`);
+          // Skip the sender and only notify users from the same school
+          if (clientUserId !== user.id && clientSocket.user.schoolCode === user.schoolCode) {
+            console.log(`Will send unread counts to: ${clientUserId}`);
+            try {
+              // Get updated unread counts for this user
+              const unreadCounts = await chatService.getUnreadCountsByChatroom(
+                clientUserId,
+                user.schoolCode,
+                user.domain
+              );
+              
+              console.log(`Sending unread counts to user ${clientUserId}:`, unreadCounts);
+              
+              // Emit unread count update
+              clientSocket.emit('unread-counts-updated', unreadCounts);
+            } catch (error) {
+              console.error('Error updating unread counts for user:', clientUserId, error);
+            }
+          }
+        }
+        
         // Return success
         if (callback) {
           callback({
@@ -525,6 +553,110 @@ io.on('connection', (socket) => {
     }
   });
   
+  // Get unread message counts for all chatrooms
+  socket.on('get-unread-counts', async (_, callback) => {
+    try {
+      const unreadCounts = await chatService.getUnreadCountsByChatroom(
+        user.id,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (callback) {
+        callback({
+          success: true,
+          unreadCounts
+        });
+      }
+    } catch (error) {
+      console.error('Error getting unread counts:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to get unread counts'
+        });
+      }
+    }
+  });
+
+  // Get unread count for a specific chatroom
+  socket.on('get-chatroom-unread-count', async (data, callback) => {
+    try {
+      const { chatroomId } = data;
+      
+      if (!chatroomId) {
+        if (callback) {
+          callback({
+            success: false,
+            error: 'Chatroom ID is required'
+          });
+        }
+        return;
+      }
+
+      const count = await chatService.getUnreadCountForChatroom(
+        chatroomId,
+        user.id,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (callback) {
+        callback({
+          success: true,
+          count
+        });
+      }
+    } catch (error) {
+      console.error('Error getting chatroom unread count:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to get unread count'
+        });
+      }
+    }
+  });
+  
+  // Mark messages as read for a specific chatroom
+  socket.on('mark-messages-read', async (data, callback) => {
+    try {
+      const { chatroomId } = data;
+      
+      if (!chatroomId) {
+        if (callback) {
+          callback({
+            success: false,
+            error: 'Chatroom ID is required'
+          });
+        }
+        return;
+      }
+
+      // Mark messages as read
+      await chatService.markMessagesAsRead(
+        chatroomId,
+        user.id,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (callback) {
+        callback({
+          success: true
+        });
+      }
+    } catch (error) {
+      console.error('Error marking messages as read:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to mark messages as read'
+        });
+      }
+    }
+  });
+  
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${user.name} (${user.username})`);
@@ -618,6 +750,55 @@ app.get('/api/messages/:chatroomId', async (req, res) => {
   } catch (error) {
     console.error('Error fetching messages:', error);
     res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+// API endpoint to get unread counts for all chatrooms
+app.get('/api/chatrooms/unread-counts', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    const user = await verifyToken(token);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    const unreadCounts = await chatService.getUnreadCountsByChatroom(
+      user.id,
+      user.schoolCode,
+      user.domain
+    );
+    
+    res.json({ success: true, unreadCounts });
+  } catch (error) {
+    console.error('Error fetching unread counts:', error);
+    res.status(500).json({ error: 'Failed to fetch unread counts' });
+  }
+});
+
+// API endpoint to get unread count for a specific chatroom
+app.get('/api/chatrooms/:chatroomId/unread-count', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    const user = await verifyToken(token);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    
+    const { chatroomId } = req.params;
+    
+    const count = await chatService.getUnreadCountForChatroom(
+      chatroomId,
+      user.id,
+      user.schoolCode,
+      user.domain
+    );
+    
+    res.json({ success: true, count });
+  } catch (error) {
+    console.error('Error fetching unread count:', error);
+    res.status(500).json({ error: 'Failed to fetch unread count' });
   }
 });
 

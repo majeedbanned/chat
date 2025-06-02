@@ -71,6 +71,11 @@ const createMessageModel = (connection) => {
       type: Boolean,
       default: false
     },
+    readBy: {
+      type: [String], // Array of user IDs who have read this message
+      default: [],
+      index: true // Index for better query performance
+    },
     fileAttachment: {
       type: fileAttachmentSchema,
       required: false

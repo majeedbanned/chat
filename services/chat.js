@@ -73,19 +73,93 @@ class ChatService {
       console.log("userId", userId);
       console.log("schoolCode", schoolCode);
       console.log("domain", domain);
+      
+      // Add user to readBy array for unread messages in this chatroom
       const result = await MessageModel.updateMany(
         { 
           chatroomId, 
           schoolCode,
           'sender.id': { $ne: userId }, // Don't mark your own messages
-          read: false
+          readBy: { $ne: userId } // Only update messages not already read by this user
         },
-        { $set: { read: true } }
+        { 
+          $addToSet: { readBy: userId }, // Add user to readBy array
+          $set: { read: true } // Keep the old read field for backward compatibility
+        }
       ).exec();
       
       return result;
     } catch (error) {
       console.error('Error marking messages as read:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get unread message count for each chatroom for a specific user
+   * @param {string} userId - User ID
+   * @param {string} schoolCode - School code
+   * @param {string} domain - Domain name
+   * @returns {Promise<Object>} Object with chatroomId as key and unread count as value
+   */
+  async getUnreadCountsByChatroom(userId, schoolCode, domain) {
+    try {
+      const connection = await connectToDatabase(domain);
+      const MessageModel = createMessageModel(connection);
+      
+      // Aggregate unread counts by chatroom
+      const unreadCounts = await MessageModel.aggregate([
+        {
+          $match: {
+            schoolCode,
+            'sender.id': { $ne: userId }, // Exclude user's own messages
+            readBy: { $ne: userId } // Messages not read by this user
+          }
+        },
+        {
+          $group: {
+            _id: '$chatroomId',
+            unreadCount: { $sum: 1 }
+          }
+        }
+      ]).exec();
+      
+      // Convert to object with chatroomId as key
+      const result = {};
+      unreadCounts.forEach(item => {
+        result[item._id] = item.unreadCount;
+      });
+      
+      return result;
+    } catch (error) {
+      console.error('Error getting unread counts by chatroom:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get unread message count for a specific chatroom
+   * @param {string} chatroomId - Chatroom ID
+   * @param {string} userId - User ID
+   * @param {string} schoolCode - School code
+   * @param {string} domain - Domain name
+   * @returns {Promise<number>} Number of unread messages
+   */
+  async getUnreadCountForChatroom(chatroomId, userId, schoolCode, domain) {
+    try {
+      const connection = await connectToDatabase(domain);
+      const MessageModel = createMessageModel(connection);
+      
+      const count = await MessageModel.countDocuments({
+        chatroomId,
+        schoolCode,
+        'sender.id': { $ne: userId }, // Exclude user's own messages
+        readBy: { $ne: userId } // Messages not read by this user
+      }).exec();
+      
+      return count;
+    } catch (error) {
+      console.error('Error getting unread count for chatroom:', error);
       throw error;
     }
   }
