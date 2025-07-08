@@ -1,6 +1,6 @@
 {
   "localhost:3000": {
-    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/parsamooz?authSource=admin",
+    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/files?authSource=admin",
     "description": "Local development database"
   },
   "localhost:3001": {
@@ -12,8 +12,20 @@
     "description": "Production database for alireza.ir"
   }
   ,
-  "parsplus1.farsamooz.ir": {
-    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/parsplus1?authSource=admin",
-    "description": "parsplus1.farsamooz.ir"
+  "files.farsamooz.ir": {
+    "schoolCode":"95012284",
+    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/files?authSource=admin",
+    "description": "files.farsamooz.ir"
+  }
+  ,
+  "omr.farsamooz.ir": {
+    "schoolCode":"95092921",
+    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/omr?authSource=admin",
+    "description": "omr.farsamooz.ir"
+  }
+  ,"expoupdate.farsamooz.ir": {
+    "schoolCode":"95092920",
+    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/expoupdate?authSource=admin",
+    "description": "expoupdate.farsamooz.ir"
   }
 } 
