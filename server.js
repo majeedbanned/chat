@@ -14,9 +14,9 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
-// Enable CORS
+// Enable CORS - Allow mobile app connections
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://formmaker3.com','https://parsplus.farsamooz.ir'],
+  origin: ['http://localhost:3000', 'https://formmaker3.com', 'https://parsplus.farsamooz.ir', 'http://localhost:8081', 'http://localhost:19006'],
   credentials: true
 }));
 
@@ -70,10 +70,10 @@ const upload = multer({
   }
 });
 
-// Socket.IO instance with CORS
+// Socket.IO instance with CORS - Allow mobile app connections
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:3000', 'https://formmaker3.com','https://parsplus.farsamooz.ir'],
+    origin: ['http://localhost:3000', 'https://formmaker3.com', 'https://parsplus.farsamooz.ir', 'http://localhost:8081', 'http://localhost:19006'],
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -250,6 +250,7 @@ io.on('connection', (socket) => {
         }
         
         // Broadcast to room
+        console.log(`[send-message] Broadcasting to room ${messageData.chatroomId}:`, savedMessage._id);
         io.to(messageData.chatroomId).emit('new-message', savedMessage);
         
         // Notify other users in the school about unread count changes
@@ -719,7 +720,12 @@ app.get('/api/chatrooms', async (req, res) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
     
-    const chatrooms = await chatService.getChatrooms(user.schoolCode, user.domain);
+    console.log('[/api/chatrooms] User:', user.id, 'Type:', user.userType, 'SchoolCode:', user.schoolCode);
+    
+    // Pass user object for role-based filtering
+    const chatrooms = await chatService.getChatrooms(user.schoolCode, user.domain, user);
+    
+    console.log('[/api/chatrooms] Found', chatrooms.length, 'chatrooms for user');
     
     res.json({ chatrooms });
   } catch (error) {

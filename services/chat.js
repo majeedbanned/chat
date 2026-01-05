@@ -38,9 +38,9 @@ class ChatService {
   async getChatroomMessages(chatroomId, schoolCode, domain, limit = 50) {
     try {
       const connection = await connectToDatabase(domain);
-
-      console.log("domain", domain);
       const MessageModel = createMessageModel(connection);
+      
+      console.log("[getChatroomMessages] Query params:", { chatroomId, schoolCode, domain });
       
       const messages = await MessageModel.find({ 
         chatroomId, 
@@ -49,6 +49,8 @@ class ChatService {
       .sort({ timestamp: -1 })
       .limit(limit)
       .exec();
+      
+      console.log("[getChatroomMessages] Found", messages.length, "messages");
       
       return messages.reverse(); // Return in chronological order
     } catch (error) {
@@ -165,21 +167,111 @@ class ChatService {
   }
 
   /**
-   * Get all chatrooms for a school
+   * Get chatrooms for a user based on their role
    * @param {string} schoolCode - School code
    * @param {string} domain - Domain name
-   * @returns {Promise<Array>} Array of chatrooms
+   * @param {Object} user - User object with id, role, userType, classCode, groups
+   * @returns {Promise<Array>} Array of chatrooms the user has access to
    */
-  async getChatrooms(schoolCode, domain) {
+  async getChatrooms(schoolCode, domain, user = null) {
     try {
       const connection = await connectToDatabase(domain);
       const collection = connection.collection('chatrooms');
       
-      const chatrooms = await collection.find({ 
-        schoolCode 
-      }).toArray();
+      // Base query - filter by school code (stored in data.schoolCode)
+      const baseQuery = { 
+        'data.schoolCode': schoolCode 
+      };
       
-      return chatrooms;
+      // Get all chatrooms for this school first
+      const allChatrooms = await collection.find(baseQuery).toArray();
+      
+      // If no user provided or user is school admin, return all chatrooms
+      if (!user || user.userType === 'school' || user.role === 'school') {
+        console.log(`[getChatrooms] School user - returning all ${allChatrooms.length} chatrooms`);
+        return allChatrooms;
+      }
+      
+      // Filter chatrooms based on user role
+      const filteredChatrooms = allChatrooms.filter(chatroom => {
+        const recipients = chatroom.data?.recipients;
+        if (!recipients) return false;
+        
+        // For teachers - check if they are in the teachers list
+        if (user.userType === 'teacher' || user.role === 'teacher') {
+          const teachersList = recipients.teachers || [];
+          // Teachers list can be array of objects with value field or array of strings
+          const hasAccess = teachersList.some(teacher => {
+            if (typeof teacher === 'string') {
+              return teacher === user.id || teacher === user.username;
+            }
+            return teacher.value === user.id || teacher.value === user.username;
+          });
+          
+          if (hasAccess) return true;
+        }
+        
+        // For students - check classCode, groups, or individual student access
+        if (user.userType === 'student' || user.role === 'student') {
+          // Check individual students list
+          const studentsList = recipients.students || [];
+          if (Array.isArray(studentsList)) {
+            const hasStudentAccess = studentsList.some(student => {
+              if (typeof student === 'string') {
+                return student === user.id || student === user.username;
+              }
+              return student.value === user.id || student.value === user.username;
+            });
+            if (hasStudentAccess) return true;
+          } else if (typeof studentsList === 'string' && studentsList) {
+            // If students is a string with comma-separated values
+            const studentIds = studentsList.split(',').map(s => s.trim());
+            if (studentIds.includes(user.id) || studentIds.includes(user.username)) return true;
+          }
+          
+          // Check classCode access
+          const classCodes = recipients.classCode || [];
+          if (Array.isArray(classCodes) && user.classCode) {
+            // User classCode can be array of objects or just values
+            const userClassCodes = Array.isArray(user.classCode) 
+              ? user.classCode.map(c => typeof c === 'object' ? c.value : c)
+              : [user.classCode];
+            
+            const hasClassAccess = classCodes.some(cc => {
+              const classValue = typeof cc === 'object' ? cc.value : cc;
+              return userClassCodes.includes(classValue);
+            });
+            if (hasClassAccess) return true;
+          }
+          
+          // Check groups access
+          const groups = recipients.groups || [];
+          if (Array.isArray(groups) && user.groups) {
+            const userGroups = Array.isArray(user.groups)
+              ? user.groups.map(g => typeof g === 'object' ? g.value : g)
+              : [user.groups];
+            
+            const hasGroupAccess = groups.some(g => {
+              const groupValue = typeof g === 'object' ? g.value : g;
+              return userGroups.includes(groupValue);
+            });
+            if (hasGroupAccess) return true;
+          } else if (typeof groups === 'string' && groups && user.groups) {
+            // If groups is a string with comma-separated values
+            const groupIds = groups.split(',').map(g => g.trim());
+            const userGroups = Array.isArray(user.groups)
+              ? user.groups.map(g => typeof g === 'object' ? g.value : g)
+              : [user.groups];
+            const hasGroupAccess = groupIds.some(gid => userGroups.includes(gid));
+            if (hasGroupAccess) return true;
+          }
+        }
+        
+        return false;
+      });
+      
+      console.log(`[getChatrooms] User ${user.id} (${user.userType}) - filtered to ${filteredChatrooms.length} of ${allChatrooms.length} chatrooms`);
+      return filteredChatrooms;
     } catch (error) {
       console.error('Error fetching chatrooms:', error);
       throw error;

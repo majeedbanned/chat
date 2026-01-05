@@ -1,31 +1,52 @@
 {
   "localhost:3000": {
-    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/files?authSource=admin",
+    "connectionString": "mongodb://myadmin:Harati2025MongoDB@185.128.137.182:27017/files?authSource=admin",
     "description": "Local development database"
   },
   "localhost:3001": {
-    "connectionString": "mongodb://masterdbUser:anotherStrongPassword123@185.128.137.182:27017/masterdb?authSource=masterdb",
+    "connectionString": "mongodb://masterdbUser:anotherHarati2025MongoDB@185.128.137.182:27017/masterdb?authSource=masterdb",
     "description": "Test environment database"
   },
   "parsplus.farsamooz.ir": {
-    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/parsamooz?authSource=admin",
+    "connectionString": "mongodb://myadmin:Harati2025MongoDB@185.128.137.182:27017/parsamooz?authSource=admin",
     "description": "Production database for alireza.ir"
   }
   ,
   "files.farsamooz.ir": {
     "schoolCode":"95012284",
-    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/files?authSource=admin",
+    "connectionString": "mongodb://myadmin:Harati2025MongoDB@185.128.137.182:27017/files?authSource=admin",
     "description": "files.farsamooz.ir"
   }
   ,
   "omr.farsamooz.ir": {
     "schoolCode":"95092921",
-    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/omr?authSource=admin",
+    "connectionString": "mongodb://myadmin:Harati2025MongoDB@185.128.137.182:27017/omr?authSource=admin",
     "description": "omr.farsamooz.ir"
   }
   ,"expoupdate.farsamooz.ir": {
     "schoolCode":"95092920",
-    "connectionString": "mongodb://myadmin:strongpassword123@185.128.137.182:27017/expoupdate?authSource=admin",
+    "connectionString": "mongodb://myadmin:Harati2025MongoDB@185.128.137.182:27017/expoupdate?authSource=admin",
     "description": "expoupdate.farsamooz.ir"
+  },
+
+  "ez1.farsamooz.ir": {
+    "schoolCode":"95096783",
+    "connectionString": "mongodb://myadmin:Harati2025MongoDB@185.128.137.182:27017/ez1?authSource=admin",
+    "description": "ez1.farsamooz.ir"
   }
+,
+
+  "ez2.farsamooz.ir": {
+    "schoolCode":"96039899",
+    "connectionString": "mongodb://myadmin:Harati2025MongoDB@185.128.137.182:27017/ez2?authSource=admin",
+    "description": "ez2.farsamooz.ir"
+  },
+
+    
+  "farsi.farsamooz.ir": {
+    "schoolCode":"80063324",
+    "connectionString": "mongodb://admin:9!179253099Nn@185.128.137.182:27017/farsi?authSource=admin",
+    "description": "farsi.farsamooz.ir"
+  }
+  
 } 
