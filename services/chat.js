@@ -480,6 +480,112 @@ class ChatService {
       return { success: false, error: error.message };
     }
   }
+
+  /**
+   * Get pinned messages for a chatroom
+   * @param {string} chatroomId - Chatroom ID
+   * @param {string} schoolCode - School code
+   * @param {string} domain - Domain name
+   * @returns {Promise<Array>} Array of pinned messages
+   */
+  async getPinnedMessages(chatroomId, schoolCode, domain) {
+    try {
+      const connection = await connectToDatabase(domain);
+      const MessageModel = createMessageModel(connection);
+      
+      const pinnedMessages = await MessageModel.find({
+        chatroomId,
+        schoolCode,
+        pinned: true
+      })
+      .sort({ pinnedAt: -1 })
+      .limit(3)
+      .exec();
+      
+      return pinnedMessages;
+    } catch (error) {
+      console.error('Error fetching pinned messages:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Pin a message
+   * @param {string} messageId - Message ID
+   * @param {string} chatroomId - Chatroom ID
+   * @param {string} userId - User ID who is pinning
+   * @param {string} schoolCode - School code
+   * @param {string} domain - Domain name
+   * @returns {Promise<Object>} Pin result
+   */
+  async pinMessage(messageId, chatroomId, userId, schoolCode, domain) {
+    try {
+      const connection = await connectToDatabase(domain);
+      const MessageModel = createMessageModel(connection);
+      
+      // Check how many messages are already pinned (max 3)
+      const pinnedCount = await MessageModel.countDocuments({
+        chatroomId,
+        schoolCode,
+        pinned: true
+      });
+      
+      if (pinnedCount >= 3) {
+        return { success: false, error: 'حداکثر ۳ پیام می‌توانید سنجاق کنید' };
+      }
+      
+      // Find and update the message
+      const message = await MessageModel.findOneAndUpdate(
+        { _id: messageId, schoolCode },
+        { 
+          pinned: true, 
+          pinnedAt: new Date(),
+          pinnedBy: userId
+        },
+        { new: true }
+      );
+      
+      if (!message) {
+        return { success: false, error: 'پیام یافت نشد' };
+      }
+      
+      return { success: true, message };
+    } catch (error) {
+      console.error('Error pinning message:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Unpin a message
+   * @param {string} messageId - Message ID
+   * @param {string} schoolCode - School code
+   * @param {string} domain - Domain name
+   * @returns {Promise<Object>} Unpin result
+   */
+  async unpinMessage(messageId, schoolCode, domain) {
+    try {
+      const connection = await connectToDatabase(domain);
+      const MessageModel = createMessageModel(connection);
+      
+      const message = await MessageModel.findOneAndUpdate(
+        { _id: messageId, schoolCode },
+        { 
+          $unset: { pinned: 1, pinnedAt: 1, pinnedBy: 1 }
+        },
+        { new: true }
+      );
+      
+      if (!message) {
+        return { success: false, error: 'پیام یافت نشد' };
+      }
+      
+      return { success: true, message };
+    } catch (error) {
+      console.error('Error unpinning message:', error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 module.exports = new ChatService(); 
