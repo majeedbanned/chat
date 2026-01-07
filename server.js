@@ -73,7 +73,7 @@ const upload = multer({
 // Socket.IO instance with CORS - Allow mobile app connections
 const io = new Server(server, {
   cors: {
-    origin: ['http://localhost:3000', 'https://formmaker3.com', 'https://parsplus.farsamooz.ir', 'http://localhost:8081', 'http://localhost:19006'],
+    origin: ['http://localhost:3000', 'https://chat.farsamooz.ir', 'https://parsplus.farsamooz.ir', 'http://localhost:8081', 'http://localhost:19006'],
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -474,6 +474,133 @@ io.on('connection', (socket) => {
           success: false,
           error: 'Failed to process reaction'
         });
+      }
+    }
+  });
+
+  // Handle getting pinned messages
+  socket.on('get-pinned-messages', async (data, callback) => {
+    try {
+      const { chatroomId } = data;
+      
+      if (!chatroomId) {
+        if (callback) {
+          callback({ success: false, error: 'Missing chatroomId' });
+        }
+        return;
+      }
+      
+      const pinnedMessages = await chatService.getPinnedMessages(
+        chatroomId,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (callback) {
+        callback({ success: true, pinnedMessages });
+      }
+    } catch (error) {
+      console.error('Error getting pinned messages:', error);
+      if (callback) {
+        callback({ success: false, error: 'Failed to get pinned messages' });
+      }
+    }
+  });
+
+  // Handle pinning a message
+  socket.on('pin-message', async (data, callback) => {
+    try {
+      const { messageId, chatroomId } = data;
+      
+      if (!messageId || !chatroomId) {
+        if (callback) {
+          callback({ success: false, error: 'Missing required fields' });
+        }
+        return;
+      }
+      
+      const result = await chatService.pinMessage(
+        messageId,
+        chatroomId,
+        user.id,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (result.success) {
+        // Get all pinned messages to broadcast
+        const pinnedMessages = await chatService.getPinnedMessages(
+          chatroomId,
+          user.schoolCode,
+          user.domain
+        );
+        
+        // Notify all users in the chatroom
+        io.to(chatroomId).emit('pinned-messages-updated', { 
+          chatroomId,
+          pinnedMessages 
+        });
+        
+        if (callback) {
+          callback({ success: true, message: result.message, pinnedMessages });
+        }
+      } else {
+        if (callback) {
+          callback({ success: false, error: result.error });
+        }
+      }
+    } catch (error) {
+      console.error('Error pinning message:', error);
+      if (callback) {
+        callback({ success: false, error: 'Failed to pin message' });
+      }
+    }
+  });
+
+  // Handle unpinning a message
+  socket.on('unpin-message', async (data, callback) => {
+    try {
+      const { messageId, chatroomId } = data;
+      
+      if (!messageId || !chatroomId) {
+        if (callback) {
+          callback({ success: false, error: 'Missing required fields' });
+        }
+        return;
+      }
+      
+      const result = await chatService.unpinMessage(
+        messageId,
+        user.schoolCode,
+        user.domain
+      );
+      
+      if (result.success) {
+        // Get all pinned messages to broadcast
+        const pinnedMessages = await chatService.getPinnedMessages(
+          chatroomId,
+          user.schoolCode,
+          user.domain
+        );
+        
+        // Notify all users in the chatroom
+        io.to(chatroomId).emit('pinned-messages-updated', { 
+          chatroomId,
+          pinnedMessages 
+        });
+        
+        if (callback) {
+          callback({ success: true, pinnedMessages });
+        }
+      } else {
+        if (callback) {
+          callback({ success: false, error: result.error });
+        }
+      }
+    } catch (error) {
+      console.error('Error unpinning message:', error);
+      if (callback) {
+        callback({ success: false, error: 'Failed to unpin message' });
       }
     }
   });
