@@ -16,7 +16,7 @@ const server = http.createServer(app);
 
 // Enable CORS - Allow mobile app connections
 app.use(cors({
-  origin: ['http://localhost:3000', 'https://formmaker3.com', 'https://parsplus.farsamooz.ir', 'http://localhost:8081', 'http://localhost:19006'],
+  origin: ['http://localhost:3000', 'https://formmaker3.com', 'https://wpa.farsamooz.ir', 'http://localhost:8081', 'http://localhost:19006'],
   credentials: true
 }));
 
