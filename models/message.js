@@ -33,7 +33,7 @@ const createMessageModel = (connection) => {
   // Define schema for referenced message (used in replies)
   const referencedMessageSchema = new Schema({
     id: { type: String, required: true },
-    content: { type: String, required: true },
+    content: { type: String, default: '' }, // Not required - can be empty for attachment-only messages
     sender: {
       id: { type: String, required: true },
       name: { type: String, required: true }
@@ -95,6 +95,19 @@ const createMessageModel = (connection) => {
     },
     replyTo: {
       type: referencedMessageSchema,
+      required: false
+    },
+    // Pinned message fields
+    pinned: {
+      type: Boolean,
+      default: false
+    },
+    pinnedAt: {
+      type: Date,
+      required: false
+    },
+    pinnedBy: {
+      type: String,
       required: false
     }
   }, { 
