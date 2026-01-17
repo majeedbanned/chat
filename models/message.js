@@ -97,6 +97,15 @@ const createMessageModel = (connection) => {
       type: referencedMessageSchema,
       required: false
     },
+    // Mentions - array of user IDs mentioned in this message
+    mentions: {
+      type: [{
+        id: String,
+        name: String,
+        username: String
+      }],
+      default: []
+    },
     // Pinned message fields
     pinned: {
       type: Boolean,
@@ -113,6 +122,16 @@ const createMessageModel = (connection) => {
   }, { 
     timestamps: true 
   });
+
+  // Add compound indexes for better query performance
+  // Index for message retrieval by chatroom (sorted by time)
+  messageSchema.index({ chatroomId: 1, timestamp: -1 });
+  // Index for pinned messages query
+  messageSchema.index({ chatroomId: 1, pinned: 1, pinnedAt: -1 });
+  // Index for unread counts aggregation
+  messageSchema.index({ schoolCode: 1, 'sender.id': 1, readBy: 1 });
+  // Index for full-text search on message content
+  messageSchema.index({ content: 'text' });
 
   // Add a validation to ensure at least content or fileAttachment is present
   messageSchema.pre('validate', function(next) {

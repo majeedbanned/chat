@@ -14,6 +14,144 @@ const path = require('path');
 const app = express();
 const server = http.createServer(app);
 
+// ===========================================
+// RATE LIMITING IMPLEMENTATION
+// ===========================================
+
+/**
+ * Simple in-memory rate limiter
+ * @param {number} maxRequests - Maximum requests allowed
+ * @param {number} windowMs - Time window in milliseconds
+ */
+class RateLimiter {
+  constructor(maxRequests = 100, windowMs = 60000) {
+    this.maxRequests = maxRequests;
+    this.windowMs = windowMs;
+    this.requests = new Map(); // userId -> { count, resetTime }
+  }
+
+  /**
+   * Check if a user is rate limited
+   * @param {string} userId - User identifier
+   * @returns {Object} { allowed: boolean, remaining: number, resetIn: number }
+   */
+  check(userId) {
+    const now = Date.now();
+    const userLimit = this.requests.get(userId);
+
+    if (!userLimit || now > userLimit.resetTime) {
+      // Reset or initialize
+      this.requests.set(userId, {
+        count: 1,
+        resetTime: now + this.windowMs
+      });
+      return { allowed: true, remaining: this.maxRequests - 1, resetIn: this.windowMs };
+    }
+
+    if (userLimit.count >= this.maxRequests) {
+      return { 
+        allowed: false, 
+        remaining: 0, 
+        resetIn: userLimit.resetTime - now 
+      };
+    }
+
+    userLimit.count++;
+    return { 
+      allowed: true, 
+      remaining: this.maxRequests - userLimit.count, 
+      resetIn: userLimit.resetTime - now 
+    };
+  }
+
+  // Clean up old entries periodically
+  cleanup() {
+    const now = Date.now();
+    for (const [userId, limit] of this.requests.entries()) {
+      if (now > limit.resetTime) {
+        this.requests.delete(userId);
+      }
+    }
+  }
+}
+
+// Create rate limiters for different operations
+const rateLimiters = {
+  messages: new RateLimiter(30, 60000),      // 30 messages per minute
+  uploads: new RateLimiter(10, 60000),       // 10 uploads per minute
+  reactions: new RateLimiter(60, 60000),     // 60 reactions per minute
+  general: new RateLimiter(100, 60000),      // 100 general requests per minute
+};
+
+// Clean up rate limiters periodically
+setInterval(() => {
+  Object.values(rateLimiters).forEach(limiter => limiter.cleanup());
+}, 60000);
+
+/**
+ * Rate limiting middleware for socket events
+ * @param {string} type - Type of rate limiter to use
+ * @returns {Function} Rate limit check function
+ */
+const checkRateLimit = (type, userId, callback) => {
+  const limiter = rateLimiters[type] || rateLimiters.general;
+  const result = limiter.check(userId);
+  
+  if (!result.allowed) {
+    if (callback) {
+      callback({
+        success: false,
+        error: `نرخ درخواست‌ها بیش از حد مجاز است. لطفاً ${Math.ceil(result.resetIn / 1000)} ثانیه صبر کنید.`,
+        rateLimited: true,
+        resetIn: result.resetIn
+      });
+    }
+    return false;
+  }
+  return true;
+};
+
+/**
+ * Express rate limiting middleware
+ */
+const expressRateLimiter = (type) => {
+  return async (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    let userId = 'anonymous';
+    
+    if (token) {
+      try {
+        const user = await verifyToken(token);
+        if (user) userId = user.id;
+      } catch (e) {
+        // Use IP as fallback
+        userId = req.ip || 'anonymous';
+      }
+    } else {
+      userId = req.ip || 'anonymous';
+    }
+    
+    const limiter = rateLimiters[type] || rateLimiters.general;
+    const result = limiter.check(userId);
+    
+    res.set({
+      'X-RateLimit-Limit': limiter.maxRequests,
+      'X-RateLimit-Remaining': result.remaining,
+      'X-RateLimit-Reset': Math.ceil(result.resetIn / 1000)
+    });
+    
+    if (!result.allowed) {
+      return res.status(429).json({
+        error: 'Too many requests',
+        message: `نرخ درخواست‌ها بیش از حد مجاز است. لطفاً ${Math.ceil(result.resetIn / 1000)} ثانیه صبر کنید.`,
+        retryAfter: Math.ceil(result.resetIn / 1000)
+      });
+    }
+    
+    next();
+  };
+};
+
 // Enable CORS - Allow mobile app connections
 app.use(cors({
   origin: ['http://localhost:3000', 'https://formmaker3.com', 'https://wpa.farsamooz.ir', 'http://localhost:8081', 'http://localhost:19006'],
@@ -58,14 +196,83 @@ const storage = multer.diskStorage({
   }
 });
 
-// Set up multer upload
+// ===========================================
+// FILE UPLOAD VALIDATION
+// ===========================================
+
+// Allowed file types whitelist
+const ALLOWED_FILE_TYPES = {
+  // Images
+  'image/jpeg': { maxSize: 10 * 1024 * 1024, extension: ['.jpg', '.jpeg'] },
+  'image/png': { maxSize: 10 * 1024 * 1024, extension: ['.png'] },
+  'image/gif': { maxSize: 5 * 1024 * 1024, extension: ['.gif'] },
+  'image/webp': { maxSize: 10 * 1024 * 1024, extension: ['.webp'] },
+  // Audio (voice messages)
+  'audio/mpeg': { maxSize: 25 * 1024 * 1024, extension: ['.mp3'] },
+  'audio/mp4': { maxSize: 25 * 1024 * 1024, extension: ['.m4a'] },
+  'audio/ogg': { maxSize: 25 * 1024 * 1024, extension: ['.ogg'] },
+  'audio/webm': { maxSize: 25 * 1024 * 1024, extension: ['.webm'] },
+  'audio/wav': { maxSize: 25 * 1024 * 1024, extension: ['.wav'] },
+  'audio/x-m4a': { maxSize: 25 * 1024 * 1024, extension: ['.m4a'] },
+  // Documents
+  'application/pdf': { maxSize: 25 * 1024 * 1024, extension: ['.pdf'] },
+  'application/msword': { maxSize: 25 * 1024 * 1024, extension: ['.doc'] },
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': { maxSize: 25 * 1024 * 1024, extension: ['.docx'] },
+  'application/vnd.ms-excel': { maxSize: 25 * 1024 * 1024, extension: ['.xls'] },
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { maxSize: 25 * 1024 * 1024, extension: ['.xlsx'] },
+  'application/vnd.ms-powerpoint': { maxSize: 50 * 1024 * 1024, extension: ['.ppt'] },
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': { maxSize: 50 * 1024 * 1024, extension: ['.pptx'] },
+  // Text files
+  'text/plain': { maxSize: 5 * 1024 * 1024, extension: ['.txt'] },
+  'text/csv': { maxSize: 10 * 1024 * 1024, extension: ['.csv'] },
+  // Archives
+  'application/zip': { maxSize: 50 * 1024 * 1024, extension: ['.zip'] },
+  'application/x-rar-compressed': { maxSize: 50 * 1024 * 1024, extension: ['.rar'] },
+  // Video (limited support)
+  'video/mp4': { maxSize: 50 * 1024 * 1024, extension: ['.mp4'] },
+  'video/quicktime': { maxSize: 50 * 1024 * 1024, extension: ['.mov'] },
+};
+
+/**
+ * Validate file type and extension
+ * @param {Object} file - Multer file object
+ * @returns {{ valid: boolean, error?: string }}
+ */
+const validateFileType = (file) => {
+  const mimeType = file.mimetype.toLowerCase();
+  const extension = path.extname(file.originalname).toLowerCase();
+  
+  // Check if MIME type is allowed
+  const allowedType = ALLOWED_FILE_TYPES[mimeType];
+  if (!allowedType) {
+    return { 
+      valid: false, 
+      error: `نوع فایل مجاز نیست. فرمت ${extension} پشتیبانی نمی‌شود.` 
+    };
+  }
+  
+  // Check if extension matches the MIME type
+  if (!allowedType.extension.includes(extension)) {
+    return { 
+      valid: false, 
+      error: `پسوند فایل با نوع آن مطابقت ندارد.` 
+    };
+  }
+  
+  return { valid: true };
+};
+
+// Set up multer upload with file validation
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: process.env.FILE_UPLOAD_MAX_SIZE ? parseInt(process.env.FILE_UPLOAD_MAX_SIZE) : 10 * 1024 * 1024 // Default 10MB limit
+    fileSize: process.env.FILE_UPLOAD_MAX_SIZE ? parseInt(process.env.FILE_UPLOAD_MAX_SIZE) : 50 * 1024 * 1024 // Default 50MB max limit
   },
   fileFilter: function(req, file, cb) {
-    // Allow all file types for now; add restrictions if needed
+    const validation = validateFileType(file);
+    if (!validation.valid) {
+      return cb(new Error(validation.error), false);
+    }
     cb(null, true);
   }
 });
@@ -103,6 +310,80 @@ io.use(async (socket, next) => {
 // Connected clients by user ID
 const connectedClients = new Map();
 
+// ===========================================
+// MENTION PARSING
+// ===========================================
+
+/**
+ * Parse mentions from message content
+ * Mentions are in format @username or @name
+ * @param {string} content - Message content
+ * @returns {Array} Array of mentioned usernames/names
+ */
+const parseMentions = (content) => {
+  if (!content) return [];
+  // Match @username patterns (alphanumeric, dots, underscores)
+  const mentionRegex = /@([\w\u0600-\u06FF\.]+)/g;
+  const matches = [];
+  let match;
+  while ((match = mentionRegex.exec(content)) !== null) {
+    matches.push(match[1]);
+  }
+  return [...new Set(matches)]; // Remove duplicates
+};
+
+// ===========================================
+// ONLINE STATUS TRACKING
+// ===========================================
+
+// Online users by school code: Map<schoolCode, Set<userId>>
+const onlineUsersBySchool = new Map();
+
+/**
+ * Get online users for a school
+ * @param {string} schoolCode - School code
+ * @returns {Array} Array of online user objects
+ */
+const getOnlineUsers = (schoolCode) => {
+  const onlineUserIds = onlineUsersBySchool.get(schoolCode) || new Set();
+  const onlineUsers = [];
+  
+  for (const userId of onlineUserIds) {
+    const socket = connectedClients.get(userId);
+    if (socket && socket.user) {
+      onlineUsers.push({
+        id: socket.user.id,
+        name: socket.user.name,
+        userType: socket.user.userType
+      });
+    }
+  }
+  
+  return onlineUsers;
+};
+
+/**
+ * Add user to online list
+ * @param {Object} user - User object
+ */
+const addOnlineUser = (user) => {
+  if (!onlineUsersBySchool.has(user.schoolCode)) {
+    onlineUsersBySchool.set(user.schoolCode, new Set());
+  }
+  onlineUsersBySchool.get(user.schoolCode).add(user.id);
+};
+
+/**
+ * Remove user from online list
+ * @param {Object} user - User object
+ */
+const removeOnlineUser = (user) => {
+  const schoolOnlineUsers = onlineUsersBySchool.get(user.schoolCode);
+  if (schoolOnlineUsers) {
+    schoolOnlineUsers.delete(user.id);
+  }
+};
+
 // Socket.IO connection handler
 io.on('connection', (socket) => {
   const user = socket.user;
@@ -110,6 +391,20 @@ io.on('connection', (socket) => {
   
   // Store client connection
   connectedClients.set(user.id, socket);
+  
+  // Add user to online list and broadcast
+  addOnlineUser(user);
+  
+  // Broadcast user online status to all users in the same school
+  const roomName = `school:${user.schoolCode}`;
+  socket.join(roomName);
+  io.to(roomName).emit('user-online', {
+    user: {
+      id: user.id,
+      name: user.name,
+      userType: user.userType
+    }
+  });
   
   // Handle joining a chatroom
   socket.on('join-room', async (chatroomId, callback) => {
@@ -148,8 +443,8 @@ io.on('connection', (socket) => {
           });
         }
       } else {
-        // Get previous messages for regular chat rooms
-        const messages = await chatService.getChatroomMessages(
+        // Get previous messages for regular chat rooms (with pagination info)
+        const result = await chatService.getChatroomMessages(
           chatroomId, 
           user.schoolCode, 
           user.domain
@@ -163,11 +458,16 @@ io.on('connection', (socket) => {
           user.domain
         );
         
-        // Send response
+        // Extract messages and pagination info
+        const { messages, hasMore, nextCursor } = result;
+        
+        // Send response with pagination info
         if (callback) {
           callback({
             success: true,
-            messages
+            messages,
+            hasMore,
+            nextCursor
           });
         }
       }
@@ -182,8 +482,55 @@ io.on('connection', (socket) => {
     }
   });
   
+  // Handle loading more messages (pagination)
+  socket.on('load-more-messages', async (data, callback) => {
+    try {
+      const { chatroomId, before, limit = 50 } = data;
+      
+      if (!chatroomId) {
+        if (callback) {
+          callback({
+            success: false,
+            error: 'Chatroom ID is required'
+          });
+        }
+        return;
+      }
+      
+      const result = await chatService.getChatroomMessages(
+        chatroomId,
+        user.schoolCode,
+        user.domain,
+        limit,
+        before
+      );
+      
+      if (callback) {
+        callback({
+          success: true,
+          messages: result.messages,
+          hasMore: result.hasMore,
+          nextCursor: result.nextCursor
+        });
+      }
+    } catch (error) {
+      console.error('Error loading more messages:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'Failed to load messages'
+        });
+      }
+    }
+  });
+  
   // Handle sending a message
   socket.on('send-message', async (messageData, callback) => {
+    // Apply rate limiting for messages
+    if (!checkRateLimit('messages', user.id, callback)) {
+      return;
+    }
+    
     try {
       // Check that at least one of content or fileAttachment is provided
       if (!messageData.content.trim() && !messageData.fileAttachment) {
@@ -228,6 +575,16 @@ io.on('connection', (socket) => {
         };
       }
       
+      // Parse and add mentions from content
+      if (messageData.mentions && Array.isArray(messageData.mentions)) {
+        newMessage.mentions = messageData.mentions;
+      } else {
+        // Parse mentions from content if not provided
+        const mentionedNames = parseMentions(messageData.content);
+        // Mentions will be resolved client-side, store the raw parsed data
+        newMessage.mentions = mentionedNames.map(name => ({ name }));
+      }
+      
       try {
         let savedMessage;
         
@@ -252,6 +609,29 @@ io.on('connection', (socket) => {
         // Broadcast to room
         console.log(`[send-message] Broadcasting to room ${messageData.chatroomId}:`, savedMessage._id);
         io.to(messageData.chatroomId).emit('new-message', savedMessage);
+        
+        // Notify mentioned users directly (if they have matching username or name)
+        if (savedMessage.mentions && savedMessage.mentions.length > 0) {
+          const mentionedNames = savedMessage.mentions.map(m => (m.name || m.username || '').toLowerCase());
+          
+          for (const [clientUserId, clientSocket] of connectedClients) {
+            if (clientUserId === user.id) continue; // Skip sender
+            if (clientSocket.user.schoolCode !== user.schoolCode) continue; // Same school only
+            
+            const clientName = (clientSocket.user.name || '').toLowerCase();
+            const clientUsername = (clientSocket.user.username || '').toLowerCase();
+            
+            if (mentionedNames.some(name => name === clientName || name === clientUsername)) {
+              console.log(`[send-message] Sending mention notification to: ${clientUserId}`);
+              clientSocket.emit('user-mentioned', {
+                messageId: savedMessage._id,
+                chatroomId: messageData.chatroomId,
+                sender: savedMessage.sender,
+                preview: savedMessage.content.substring(0, 100)
+              });
+            }
+          }
+        }
         
         // Notify other users in the school about unread count changes
         // Get all connected clients from the same school
@@ -422,6 +802,11 @@ io.on('connection', (socket) => {
   
   // Handle message reactions
   socket.on('toggle-reaction', async (data, callback) => {
+    // Apply rate limiting for reactions
+    if (!checkRateLimit('reactions', user.id, callback)) {
+      return;
+    }
+    
     try {
       const { messageId, chatroomId, emoji } = data;
       
@@ -785,10 +1170,118 @@ io.on('connection', (socket) => {
     }
   });
   
+  // ===========================================
+  // TYPING INDICATORS
+  // ===========================================
+  
+  // Handle typing start event
+  socket.on('typing-start', (data) => {
+    const { chatroomId } = data;
+    if (!chatroomId) return;
+    
+    // Broadcast to other users in the room
+    socket.to(chatroomId).emit('user-typing', {
+      chatroomId,
+      user: {
+        id: user.id,
+        name: user.name
+      }
+    });
+  });
+  
+  // Handle typing stop event
+  socket.on('typing-stop', (data) => {
+    const { chatroomId } = data;
+    if (!chatroomId) return;
+    
+    // Broadcast to other users in the room
+    socket.to(chatroomId).emit('user-stopped-typing', {
+      chatroomId,
+      userId: user.id
+    });
+  });
+  
+  // ===========================================
+  // MESSAGE SEARCH
+  // ===========================================
+  
+  // Search messages in a chatroom or globally
+  socket.on('search-messages', async (data, callback) => {
+    try {
+      const { chatroomId, query, limit = 50 } = data;
+      
+      if (!query || query.trim().length < 2) {
+        if (callback) {
+          callback({
+            success: false,
+            error: 'حداقل ۲ کاراکتر برای جستجو وارد کنید'
+          });
+        }
+        return;
+      }
+      
+      const results = await chatService.searchMessages(
+        chatroomId,
+        user.schoolCode,
+        user.domain,
+        query.trim(),
+        limit
+      );
+      
+      if (callback) {
+        callback({
+          success: true,
+          messages: results,
+          query: query.trim()
+        });
+      }
+    } catch (error) {
+      console.error('Error searching messages:', error);
+      if (callback) {
+        callback({
+          success: false,
+          error: 'خطا در جستجو'
+        });
+      }
+    }
+  });
+
+  // ===========================================
+  // ONLINE STATUS HANDLERS
+  // ===========================================
+  
+  // Get online users for the school
+  socket.on('get-online-users', (_, callback) => {
+    const onlineUsers = getOnlineUsers(user.schoolCode);
+    if (callback) {
+      callback({
+        success: true,
+        onlineUsers
+      });
+    }
+  });
+  
   // Handle disconnection
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${user.name} (${user.username})`);
     connectedClients.delete(user.id);
+    
+    // Remove from online users and broadcast
+    removeOnlineUser(user);
+    const roomName = `school:${user.schoolCode}`;
+    io.to(roomName).emit('user-offline', {
+      userId: user.id
+    });
+    
+    // Broadcast that user stopped typing (if they were) to all rooms
+    socket.rooms.forEach((roomId) => {
+      if (roomId !== socket.id) {
+        socket.to(roomId).emit('user-stopped-typing', {
+          chatroomId: roomId,
+          userId: user.id
+        });
+      }
+    });
   });
 });
 
@@ -797,11 +1290,29 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'OK', message: 'Chat server is running' });
 });
 
-// Upload file endpoint
-app.post('/api/upload', upload.single('file'), async (req, res) => {
+// Upload file endpoint (with rate limiting)
+app.post('/api/upload', expressRateLimiter('uploads'), (req, res, next) => {
+  // Custom error handler for multer
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ 
+            error: 'حجم فایل بیش از حد مجاز است.',
+            maxSize: '50MB'
+          });
+        }
+        return res.status(400).json({ error: err.message });
+      }
+      // Custom validation error
+      return res.status(400).json({ error: err.message });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ error: 'هیچ فایلی انتخاب نشده است.' });
     }
 
     const token = req.headers.authorization?.split(' ')[1];
@@ -816,6 +1327,9 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     // Check if file is an image
     const isImage = req.file.mimetype.startsWith('image/');
     
+    // Check if file is audio (voice message)
+    const isAudio = req.file.mimetype.startsWith('audio/');
+    
     // Create file attachment object with the same structure as our Mongoose schema
     const fileAttachment = {
       filename: req.file.filename,
@@ -824,7 +1338,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
       size: req.file.size,
       type: req.file.mimetype,
       url: `/uploads/${user.schoolCode}/chat/${req.file.filename}`,
-      isImage
+      isImage,
+      isAudio
     };
 
     // Log the file attachment object for debugging
@@ -833,7 +1348,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     res.json({ success: true, fileAttachment });
   } catch (error) {
     console.error('Error uploading file:', error);
-    res.status(500).json({ error: 'Failed to upload file: ' + error.message });
+    res.status(500).json({ error: 'خطا در آپلود فایل: ' + error.message });
   }
 });
 

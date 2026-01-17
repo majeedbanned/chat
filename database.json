@@ -1,6 +1,6 @@
 {
   "localhost:3000": {
-    "connectionString": "mongodb://myadmin:Harati2025MongoDB@185.128.137.182:27017/files?authSource=admin",
+    "connectionString": "mongodb://admin:9!179253099Nn@127.0.0.1:27017/farsi?authSource=admin",
     "description": "Local development database"
   },
   "localhost:3001": {
@@ -45,7 +45,7 @@
     
   "farsi.farsamooz.ir": {
     "schoolCode":"80063324",
-    "connectionString": "mongodb://admin:9!179253099Nn@185.128.137.182:27017/farsi?authSource=admin",
+    "connectionString": "mongodb://admin:9!179253099Nn@127.0.0.1:27017/farsi?authSource=admin",
     "description": "farsi.farsamooz.ir"
   }
   

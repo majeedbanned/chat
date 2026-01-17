@@ -28,31 +28,51 @@ class ChatService {
   }
 
   /**
-   * Get messages for a specific chatroom
+   * Get messages for a specific chatroom with cursor-based pagination
    * @param {string} chatroomId - Chatroom ID
    * @param {string} schoolCode - School code
    * @param {string} domain - Domain name
    * @param {number} limit - Maximum number of messages to return
-   * @returns {Promise<Array>} Array of messages
+   * @param {string} before - Cursor: get messages before this timestamp (ISO string)
+   * @returns {Promise<Object>} Object with messages array and pagination info
    */
-  async getChatroomMessages(chatroomId, schoolCode, domain, limit = 50) {
+  async getChatroomMessages(chatroomId, schoolCode, domain, limit = 50, before = null) {
     try {
       const connection = await connectToDatabase(domain);
       const MessageModel = createMessageModel(connection);
       
-      console.log("[getChatroomMessages] Query params:", { chatroomId, schoolCode, domain });
+      console.log("[getChatroomMessages] Query params:", { chatroomId, schoolCode, domain, limit, before });
       
-      const messages = await MessageModel.find({ 
-        chatroomId, 
-        schoolCode 
-      })
-      .sort({ timestamp: -1 })
-      .limit(limit)
-      .exec();
+      // Build query with optional cursor
+      const query = { chatroomId, schoolCode };
+      if (before) {
+        query.timestamp = { $lt: new Date(before) };
+      }
       
-      console.log("[getChatroomMessages] Found", messages.length, "messages");
+      // Fetch one extra to check if there are more messages
+      const messages = await MessageModel.find(query)
+        .sort({ timestamp: -1 })
+        .limit(limit + 1)
+        .exec();
       
-      return messages.reverse(); // Return in chronological order
+      // Check if there are more messages
+      const hasMore = messages.length > limit;
+      if (hasMore) {
+        messages.pop(); // Remove the extra message
+      }
+      
+      console.log("[getChatroomMessages] Found", messages.length, "messages, hasMore:", hasMore);
+      
+      // Get the oldest message timestamp for next cursor
+      const oldestTimestamp = messages.length > 0 
+        ? messages[messages.length - 1].timestamp.toISOString() 
+        : null;
+      
+      return {
+        messages: messages.reverse(), // Return in chronological order
+        hasMore,
+        nextCursor: hasMore ? oldestTimestamp : null
+      };
     } catch (error) {
       console.error('Error fetching messages:', error);
       throw error;
@@ -478,6 +498,49 @@ class ChatService {
     } catch (error) {
       console.error('Error toggling reaction:', error);
       return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Search messages in a chatroom
+   * @param {string} chatroomId - Chatroom ID (optional, search all if null)
+   * @param {string} schoolCode - School code
+   * @param {string} domain - Domain name
+   * @param {string} query - Search query
+   * @param {number} limit - Maximum results
+   * @returns {Promise<Array>} Array of matching messages
+   */
+  async searchMessages(chatroomId, schoolCode, domain, query, limit = 50) {
+    try {
+      const connection = await connectToDatabase(domain);
+      const MessageModel = createMessageModel(connection);
+      
+      // Build search query
+      const searchQuery = {
+        schoolCode,
+        $text: { $search: query }
+      };
+      
+      // Optionally filter by chatroom
+      if (chatroomId) {
+        searchQuery.chatroomId = chatroomId;
+      }
+      
+      // Use text search with relevance scoring
+      const messages = await MessageModel.find(
+        searchQuery,
+        { score: { $meta: 'textScore' } }
+      )
+      .sort({ score: { $meta: 'textScore' }, timestamp: -1 })
+      .limit(limit)
+      .exec();
+      
+      console.log(`[searchMessages] Found ${messages.length} results for "${query}"`);
+      
+      return messages;
+    } catch (error) {
+      console.error('Error searching messages:', error);
+      throw error;
     }
   }
 

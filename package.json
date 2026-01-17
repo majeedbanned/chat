@@ -18,5 +18,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
+  },
+  "overrides": {
+    "buffer-equal-constant-time": "^1.0.1"
   }
 } 
