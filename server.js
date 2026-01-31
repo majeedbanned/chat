@@ -210,6 +210,7 @@ const ALLOWED_FILE_TYPES = {
   // Audio (voice messages)
   'audio/mpeg': { maxSize: 25 * 1024 * 1024, extension: ['.mp3'] },
   'audio/mp4': { maxSize: 25 * 1024 * 1024, extension: ['.m4a'] },
+  'audio/m4a': { maxSize: 25 * 1024 * 1024, extension: ['.m4a'] },  // Expo/iOS voice recording
   'audio/ogg': { maxSize: 25 * 1024 * 1024, extension: ['.ogg'] },
   'audio/webm': { maxSize: 25 * 1024 * 1024, extension: ['.webm'] },
   'audio/wav': { maxSize: 25 * 1024 * 1024, extension: ['.wav'] },
