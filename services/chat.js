@@ -299,6 +299,35 @@ class ChatService {
   }
 
   /**
+   * Get a single chatroom by ID (for push notification recipient resolution)
+   * @param {string} chatroomId - Chatroom ID (string or ObjectId)
+   * @param {string} domain - Domain name
+   * @returns {Promise<Object|null>} Chatroom document or null
+   */
+  async getChatroomById(chatroomId, domain) {
+    try {
+
+      console.log('chatroomId>>>>>>',( chatroomId));
+      console.log('domain>>>>>>',( domain));
+      const connection = await connectToDatabase(domain);
+      const collection = connection.collection('chatrooms');
+      if (!chatroomId) return null;
+      const id = mongoose.Types.ObjectId.isValid(chatroomId) && String(chatroomId).length === 24
+        ? new mongoose.Types.ObjectId(chatroomId)
+        : chatroomId;
+      const chatroom = await collection.findOne({ _id: id });
+
+
+      console.log('chatroom>>>>>>',( chatroom));
+
+      return chatroom;
+    } catch (error) {
+      console.error('Error fetching chatroom by id:', error);
+      return null;
+    }
+  }
+
+  /**
    * Delete a specific message
    * @param {string} messageId - Message ID
    * @param {string} userId - User ID (for authorization)

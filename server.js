@@ -6,6 +6,7 @@ const cors = require('cors');
 const { verifyToken } = require('./lib/auth');
 const chatService = require('./services/chat');
 const floatingChatService = require('./services/floatingChat');
+const notifyFormmaker3 = require('./lib/notifyFormmaker3');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
@@ -611,6 +612,73 @@ io.on('connection', (socket) => {
         console.log(`[send-message] Broadcasting to room ${messageData.chatroomId}:`, savedMessage._id);
         io.to(messageData.chatroomId).emit('new-message', savedMessage);
         
+        // Ask formmaker3 to send push notifications (new message only when teacher sends; mention always)
+        if (messageData.chatroomId !== 'floating-chat') {
+          console.log('messageData.chatroomId>>>>>>', messageData.chatroomId);
+          chatService.getChatroomById(messageData.chatroomId, user.domain).then((chatroom) => {
+           console.log('chatroom>>>>>>',JSON.stringify( chatroom));
+            if (!chatroom || !chatroom.data) return;
+            const recipients = chatroom.data.recipients || {};
+            const students = (recipients.students || []).map((s) => (typeof s === 'object' ? s.value : s)).filter(Boolean);
+            const teachers = (recipients.teachers || []).map((t) => (typeof t === 'object' ? t.value : t)).filter(Boolean);
+            const classCodes = (recipients.classCode || []).map((c) => (typeof c === 'object' ? c.value : c)).filter(Boolean);
+            const senderCode = user.username || user.id;
+            const recipientStudentCodes = students.filter((c) => c !== senderCode);
+            const recipientTeacherCodes = teachers.filter((c) => c !== senderCode);
+            // classCodes are class identifiers (e.g. "7A"); pass all so formmaker3 notifies all students in those classes
+            const recipientClassCodes = classCodes;
+            const hasRecipients = recipientStudentCodes.length > 0 || recipientTeacherCodes.length > 0 || recipientClassCodes.length > 0;
+            const messagePreview = savedMessage.content
+              ? savedMessage.content.substring(0, 100)
+              : (savedMessage.fileAttachment && (savedMessage.fileAttachment.isImage || savedMessage.fileAttachment.type?.startsWith?.('image/')))
+                ? '📷 تصویر'
+                : '📎 فایل';
+            const chatroomName = chatroom.data.chatroomName || 'گفتگو';
+            // New-message push: only when a teacher or school user sends
+
+            // console.log('hasRecipients>>>>>>', hasRecipients);
+           // console.log('*****recipientClassCodes*****>>>>>>', recipientClassCodes);
+            // console.log('recipientStudentCodes>>>>>>', recipientStudentCodes);
+            // console.log('recipientTeacherCodes>>>>>>', recipientTeacherCodes);
+
+
+           // return;
+            if (hasRecipients && (user.userType === 'teacher' || user.userType === 'school')) {
+              console.log('[send-message] Triggering new-message push: room=', chatroomName, 'senderType=', user.userType);
+              notifyFormmaker3.notifyNewMessage({
+                domain: user.domain,
+                schoolCode: user.schoolCode,
+                chatroomId: messageData.chatroomId,
+                chatroomName,
+                senderName: user.name || user.username || 'کاربر',
+                messagePreview,
+                recipientStudentCodes,
+                recipientTeacherCodes,
+                recipientClassCodes,
+                senderCode,
+              });
+            }
+            if (savedMessage.mentions && savedMessage.mentions.length > 0) {
+              const mentionedCodes = savedMessage.mentions
+                .map((m) => m.id || m.username || m.name)
+                .filter(Boolean);
+              if (mentionedCodes.length > 0) {
+                console.log('[send-message] Triggering mention push: room=', chatroomName, 'mentionedCount=', mentionedCodes.length);
+                notifyFormmaker3.notifyMention({
+                  domain: user.domain,
+                  schoolCode: user.schoolCode,
+                  chatroomId: messageData.chatroomId,
+                  chatroomName,
+                  senderName: user.name || user.username || 'کاربر',
+                  messagePreview,
+                  mentionedStudentCodes: mentionedCodes,
+                  mentionedTeacherCodes: mentionedCodes,
+                });
+              }
+            }
+          }).catch((err) => console.error('[send-message] getChatroomById for push:', err));
+        }
+        
         // Notify mentioned users directly (if they have matching username or name)
         if (savedMessage.mentions && savedMessage.mentions.length > 0) {
           const mentionedNames = savedMessage.mentions.map(m => (m.name || m.username || '').toLowerCase());
@@ -640,7 +708,7 @@ io.on('connection', (socket) => {
         console.log(`Sender: ${user.id} (${user.schoolCode})`);
         
         for (const [clientUserId, clientSocket] of connectedClients) {
-          console.log(`Checking client: ${clientUserId} (${clientSocket.user.schoolCode})`);
+          console.log(`Checking client:11 ${clientUserId} (${clientSocket.user.schoolCode})`);
           // Skip the sender and only notify users from the same school
           if (clientUserId !== user.id && clientSocket.user.schoolCode === user.schoolCode) {
             console.log(`Will send unread counts to: ${clientUserId}`);
